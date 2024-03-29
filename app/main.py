@@ -1,11 +1,16 @@
 import asyncio
+import itertools
+import time
+
 from app.parsers import RedisParser, JSONParser
 
 redisParser = RedisParser()
 jsonParser = JSONParser()
 
+store = {}
 
 async def handle_message(msg: str | list):
+    now = time.time()
     if isinstance(msg, str):
         if msg.lower() == "ping":
             yield "PONG"
@@ -16,6 +21,26 @@ async def handle_message(msg: str | list):
             yield "" if not args else args[0]
         elif cmd == "ping":
             yield "PONG"
+        elif cmd == "set":
+            key, val, *other = args
+            set_args = dict(itertools.batched(other, 2))
+            if "px" in set_args:
+                exp = now + int(set_args["px"]) / 1000
+            else:
+                exp = None
+            store[key] = (val, exp)
+            yield "OK"
+        elif cmd == "get":
+            key, *__ = args
+            if key not in store:
+                yield None
+                return
+            val, exp = store[key]
+            if exp and exp < now:
+                del store[key]
+                yield None
+            else:
+                yield val
         else:
             yield f"Unknown command: {cmd}"
 

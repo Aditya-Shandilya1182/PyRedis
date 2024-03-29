@@ -5,7 +5,6 @@ class RedisParser:
     def parse(self, data):
 
         lines = data.split("\r\n")
-        print(lines)
         return self._parse(lines)
     
     def _parse(self, lines):
