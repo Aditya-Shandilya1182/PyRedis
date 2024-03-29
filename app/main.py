@@ -1,6 +1,8 @@
 import asyncio
 import itertools
 import time
+import argparse
+import functools
 
 from app.parsers import RedisParser, JSONParser
 
@@ -9,7 +11,7 @@ jsonParser = JSONParser()
 
 store = {}
 
-async def handle_message(msg: str | list):
+async def handle_message(msg: str | list, node_config: dict):
     now = time.time()
     if isinstance(msg, str):
         if msg.lower() == "ping":
@@ -41,10 +43,20 @@ async def handle_message(msg: str | list):
                 yield None
             else:
                 yield val
+        elif cmd == "info":
+            kind = args[0] if args else None
+            if kind == "replication":
+                yield f"""
+# Replication
+role:{node_config['role']}
+                """
+            else:
+                print(f"unknown INFO kind {kind!r}")
+                yield f"ERR unknown or unsupported subcommand or invalid argument for 'INFO'."
         else:
             yield f"Unknown command: {cmd}"
 
-async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, node_config: dict):
     
     parser = redisParser
 
@@ -69,7 +81,7 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
             parsedMessage = parser.parse(message)
             print(f"Parsed message: {parsedMessage!r}")
 
-            async for response in handle_message(parsedMessage):
+            async for response in handle_message(parsedMessage, node_config):
                 print(f"Response: {response!r}")
                 responseSerialized = parser.serialize(response)
                 print(f"Sent response: {response!r} to {clientData!r}")
@@ -84,7 +96,43 @@ async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
 
 async def main():
 
-    server = await asyncio.start_server(handle, "0.0.0.0", 6379, reuse_port=True)
+    parser = argparse.ArgumentParser(description="Run the server")
+    
+    parser.add_argument(
+        "--port", type=int, default=6379, help="The port to run the server on"
+    )
+
+    parser.add_argument(
+        "--host", type = str, default = "0.0.0.0", help = "The host to run the server on"
+    )
+
+    parser.add_argument(
+        "--replicaof", nargs=2, help="The master host and port to replicate from"
+    )
+
+    args = parser.parse_args()
+
+    node_config = {
+        "host": args.host,
+        "port": args.port,
+        "role": "master",
+        "master_host": "",
+        "master_port": "",
+    }
+
+    if args.replicaof:
+        master_host, master_port = args.replicaof
+        node_config["role"] = "slave"
+        node_config["master_host"] = master_host
+        node_config["master_port"] = master_port
+        print(f"Replica of {master_host}:{master_port}")
+
+    server = await asyncio.start_server(
+        functools.partial(handle_client, node_config=node_config),
+        "0.0.0.0",
+        args.port,
+        reuse_port=True,
+    )
 
     address = ", ".join(str(sock.getsockname()) for sock in server.sockets)
     print(f"Serving on {address}")

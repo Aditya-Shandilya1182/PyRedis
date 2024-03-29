@@ -37,7 +37,7 @@ class RedisParser:
 
     def serialize(self, data):
 
-        if isinstance(data, str):
+        if isinstance(data, str) and "\n" not in data:
             return f"+{data}\r\n"
         
         elif isinstance(data, Exception):
